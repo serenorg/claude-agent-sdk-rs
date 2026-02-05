@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [0.6.5](https://github.com/compare/v0.6.4..v0.6.5) - 2026-02-05
+
+### Bug Fixes
+
+- Omit updatedInput when None instead of defaulting to empty object - ([be6ef83](https://github.com/commit/be6ef83)) - Christian Smith
+
+  `PermissionResultAllow::default()` was sending `updatedInput: {}` which
+  replaced original tool arguments with an empty object, breaking MCP tool
+  calls. The CLI also rejects `updatedInput: null` with a ZodError. The
+  correct behavior is to omit the field entirely when `None` (via
+  `skip_serializing_if`), and have callers explicitly set `Some(input)` to
+  echo arguments through.
+
+---
 ## [0.6.4](https://github.com/compare/v0.6.3..v0.6.4) - 2026-02-03
 
 ### Bug Fixes
