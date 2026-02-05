@@ -33,25 +33,16 @@ pub enum PermissionResult {
 }
 
 /// Permission result for allowing tool use
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PermissionResultAllow {
-    /// Updated tool input (if modified)
-    #[serde(skip_serializing_if = "Option::is_none", rename = "updatedInput")]
+    /// Updated tool input. Omitted when None so the CLI keeps original args.
+    /// Set to Some(value) to explicitly pass arguments through.
+    /// WARNING: `Some(json!({}))` means "use empty args", not "no change".
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "updatedInput")]
     pub updated_input: Option<serde_json::Value>,
     /// Permission updates to apply
     #[serde(skip_serializing_if = "Option::is_none", rename = "updatedPermissions")]
     pub updated_permissions: Option<Vec<PermissionUpdate>>,
-}
-
-impl Default for PermissionResultAllow {
-    fn default() -> Self {
-        Self {
-            // Claude Code CLI requires updatedInput to be present (not omitted)
-            // even when no modifications are made. An empty object satisfies this.
-            updated_input: Some(serde_json::json!({})),
-            updated_permissions: None,
-        }
-    }
 }
 
 /// Permission result for denying tool use
@@ -185,14 +176,14 @@ mod tests {
     }
 
     #[test]
-    fn test_permission_result_allow_default_includes_updated_input() {
-        // Claude Code CLI requires updatedInput to be present even when empty.
-        // This test ensures Default::default() serializes with updatedInput: {}
+    fn test_permission_result_allow_default_omits_updated_input() {
+        // Default must omit updatedInput so CLI keeps original arguments.
+        // Callers should set updated_input = Some(input) to echo args back.
         let result = PermissionResult::Allow(Default::default());
 
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["behavior"], "allow");
-        assert_eq!(json["updatedInput"], json!({}));
+        assert!(json.get("updatedInput").is_none());
         assert!(json.get("updatedPermissions").is_none());
     }
 
