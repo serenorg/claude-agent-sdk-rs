@@ -118,6 +118,22 @@ impl SubprocessTransport {
 
     /// Find the Claude CLI executable
     fn find_cli() -> Result<PathBuf> {
+        // Strategy 0: Check CLAUDE_CLI_PATH environment variable first
+        // This allows parent processes (e.g., seren-desktop) to explicitly specify the CLI path
+        // and is more reliable than PATH resolution when running as a sidecar in GUI apps
+        if let Ok(cli_path) = std::env::var("CLAUDE_CLI_PATH") {
+            let path = PathBuf::from(&cli_path);
+            if path.exists() && path.is_file() {
+                tracing::info!("[SDK] Using CLAUDE_CLI_PATH: {}", cli_path);
+                return Ok(path);
+            } else {
+                tracing::warn!(
+                    "[SDK] CLAUDE_CLI_PATH set to '{}' but path does not exist or is not a file. Falling back to PATH resolution.",
+                    cli_path
+                );
+            }
+        }
+
         // Strategy 1: Try executing 'claude' directly from PATH
         // This is the most reliable method as it respects the shell's PATH resolution
         if let Ok(output) = std::process::Command::new("claude")
@@ -127,6 +143,11 @@ impl SubprocessTransport {
         {
             // 'claude' is in PATH and executable, return it as-is
             // The OS will resolve it when we spawn the process
+            let version = String::from_utf8_lossy(&output.stdout);
+            tracing::info!(
+                "[SDK] Found 'claude' via PATH resolution. Version: {}",
+                version.lines().next().unwrap_or("unknown").trim()
+            );
             return Ok(PathBuf::from("claude"));
         }
 
@@ -139,6 +160,7 @@ impl SubprocessTransport {
             let path = PathBuf::from(path_str.trim());
             // Verify the path exists and is executable
             if path.exists() && path.is_file() {
+                tracing::info!("[SDK] Found claude via 'which': {}", path.display());
                 return Ok(path);
             }
         }
@@ -152,6 +174,7 @@ impl SubprocessTransport {
                 if let Some(first_line) = path_str.lines().next() {
                     let path = PathBuf::from(first_line.trim());
                     if path.exists() && path.is_file() {
+                        tracing::info!("[SDK] Found claude via 'where': {}", path.display());
                         return Ok(path);
                     }
                 }
@@ -206,14 +229,10 @@ impl SubprocessTransport {
         // Check each common path
         for path in common_paths {
             if path.exists() && path.is_file() {
-                return Ok(path);
-            }
-        }
-
-        // Strategy 5: Check if CLAUDE_CLI_PATH environment variable is set
-        if let Ok(cli_path) = std::env::var("CLAUDE_CLI_PATH") {
-            let path = PathBuf::from(cli_path);
-            if path.exists() && path.is_file() {
+                tracing::info!(
+                    "[SDK] Found claude at common installation path: {}",
+                    path.display()
+                );
                 return Ok(path);
             }
         }
@@ -596,8 +615,14 @@ impl SubprocessTransport {
     async fn check_claude_version(&self) -> Result<()> {
         // Skip if option is set OR environment variable is set
         if self.options.skip_version_check || std::env::var(SKIP_VERSION_CHECK_ENV).is_ok() {
+            tracing::debug!("[SDK] Skipping version check (disabled via option or env)");
             return Ok(());
         }
+
+        tracing::info!(
+            "[SDK] Checking version of Claude CLI at: {}",
+            self.cli_path.display()
+        );
 
         let output = make_command(&self.cli_path)
             .arg("--version")
@@ -605,7 +630,8 @@ impl SubprocessTransport {
             .await
             .map_err(|e| {
                 ClaudeError::Connection(ConnectionError::new(format!(
-                    "Failed to get Claude version: {}",
+                    "Failed to get Claude version from '{}': {}",
+                    self.cli_path.display(),
                     e
                 )))
             })?;
@@ -617,6 +643,12 @@ impl SubprocessTransport {
             .and_then(|line| line.split_whitespace().next())
             .unwrap_or("")
             .trim();
+
+        tracing::info!(
+            "[SDK] Claude CLI version: {} (minimum required: {})",
+            version,
+            MIN_CLI_VERSION
+        );
 
         if !check_version(version) {
             return Err(ClaudeError::Connection(ConnectionError::new(format!(
